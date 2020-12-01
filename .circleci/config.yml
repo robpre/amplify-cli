@@ -2033,6 +2033,7 @@ workflows:
             branches:
               only:
                 - master
+                - iterative-update
           requires:
             - build
             - mock_e2e_tests
@@ -2052,6 +2053,7 @@ workflows:
                 - master
                 - beta
                 - backendManager
+                - iterative-update
           requires:
             - build
       - build_pkg_binaries:
@@ -2202,6 +2204,7 @@ workflows:
             branches:
               only:
                 - master
+                - iterative-update
           requires:
             - publish_to_local_registry
       - amplify-configure-amplify_e2e_tests:
