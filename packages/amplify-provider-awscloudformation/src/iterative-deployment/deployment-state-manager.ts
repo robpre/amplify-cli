@@ -69,28 +69,12 @@ export class DeploymentStateManager implements IDeploymentStateManager {
     return true;
   };
 
-  public finishDeployment = async (status: DeploymentStatus): Promise<boolean> => {
-    if (status !== DeploymentStatus.FAILED && status !== DeploymentStatus.DEPLOYED && status !== DeploymentStatus.ROLLED_BACK) {
-      throw new Error(`Invalid status ${status} for finishDeployment.`);
-    }
-
-    if (!(await this.isDeploymentInProgress())) {
-      throw new Error(`Cannot finish a deployment when it was not started.`);
-    }
-
-    // Only persist status if the deployment was not finished by the statemachine in a clean way
-    // either with deployed or rolled back.
-    if (
-      (status === DeploymentStatus.FAILED || status === DeploymentStatus.DEPLOYED || status === DeploymentStatus.ROLLED_BACK) &&
-      this.currentState.status !== DeploymentStatus.ROLLED_BACK &&
-      this.currentState.status !== DeploymentStatus.DEPLOYED
-    ) {
+  public failDeployment = async (): Promise<void> => {
+    if (this.currentState.status !== DeploymentStatus.ROLLED_BACK && this.currentState.status !== DeploymentStatus.DEPLOYED) {
       this.currentState.finishedAt = new Date().toISOString();
-      this.currentState.status = status;
+      this.currentState.status = DeploymentStatus.FAILED;
 
       await this.saveState();
-
-      return true;
     }
   };
 
@@ -100,16 +84,69 @@ export class DeploymentStateManager implements IDeploymentStateManager {
     await this.saveState();
   };
 
-  public advanceStep = async (): Promise<void> => {
-    // Sanity check, should not happen during normal execution
-    if (
-      (this.direction === 1 && this.currentState.currentStepIndex === this.currentState.steps.length - 1) ||
-      (this.direction === -1 && this.currentState.currentStepIndex === 0)
-    ) {
-      throw new Error(`No more deployment steps to advance to (index: ${this.currentState.currentStepIndex}, direction: ${this.direction}`);
+  public startCurrentStep = async (): Promise<void> => {
+    if (this.direction === 1) {
+      if (this.currentState.steps[this.currentState.currentStepIndex].status !== DeploymentStepStatus.WAITING_FOR_DEPLOYMENT) {
+        throw new Error(
+          `Cannot start step then the current step is in ${this.currentState.steps[this.currentState.currentStepIndex].status} status.`,
+        );
+      }
+
+      this.currentState.steps[this.currentState.currentStepIndex].status = DeploymentStepStatus.DEPLOYING;
+    } else if (this.direction === -1) {
+      if (this.currentState.steps[this.currentState.currentStepIndex].status !== DeploymentStepStatus.WAITING_FOR_ROLLBACK) {
+        throw new Error(
+          `Cannot start step then the current step is in ${this.currentState.steps[this.currentState.currentStepIndex].status} status.`,
+        );
+      }
+
+      this.currentState.steps[this.currentState.currentStepIndex].status = DeploymentStepStatus.ROLLING_BACK;
     }
 
-    this.currentState.currentStepIndex += this.direction;
+    await this.saveState();
+  };
+
+  public advanceStep = async (): Promise<void> => {
+    if (!(await this.isDeploymentInProgress())) {
+      throw new Error(`Cannot advance a deployment when it was not started.`);
+    }
+
+    if (this.direction === 1 && this.currentState.steps[this.currentState.currentStepIndex].status !== DeploymentStepStatus.DEPLOYING) {
+      throw new Error(
+        `Cannot advance step then the current step is in ${this.currentState.steps[this.currentState.currentStepIndex].status} status.`,
+      );
+    } else if (
+      this.direction === -1 &&
+      this.currentState.steps[this.currentState.currentStepIndex].status !== DeploymentStepStatus.ROLLING_BACK
+    ) {
+      throw new Error(
+        `Cannot advance step then the current step is in ${this.currentState.steps[this.currentState.currentStepIndex].status} status.`,
+      );
+    }
+
+    // Check if we are finishing the deployment or just advancing a step
+    if (this.direction === 1 && this.currentState.currentStepIndex === this.currentState.steps.length - 1) {
+      this.currentState.steps[this.currentState.currentStepIndex].status = DeploymentStepStatus.DEPLOYED;
+
+      this.currentState.currentStepIndex = 0;
+      this.currentState.finishedAt = new Date().toISOString();
+      this.currentState.status = DeploymentStatus.DEPLOYED;
+    } else if (this.direction === -1 && this.currentState.currentStepIndex === 0) {
+      this.currentState.steps[this.currentState.currentStepIndex].status = DeploymentStepStatus.ROLLED_BACK;
+
+      this.currentState.currentStepIndex = 0;
+      this.currentState.finishedAt = new Date().toISOString();
+      this.currentState.status = DeploymentStatus.ROLLED_BACK;
+    } else {
+      // Regular advance step
+      if (this.direction === 1) {
+        this.currentState.steps[this.currentState.currentStepIndex].status = DeploymentStepStatus.DEPLOYED;
+      } else if (this.direction === -1) {
+        this.currentState.steps[this.currentState.currentStepIndex].status = DeploymentStepStatus.ROLLED_BACK;
+      }
+
+      this.currentState.currentStepIndex += this.direction;
+    }
 
     await this.saveState();
   };
@@ -120,6 +157,10 @@ export class DeploymentStateManager implements IDeploymentStateManager {
     }
 
     this.direction = -1;
+
+    for (let i = 0; i <= this.currentState.currentStepIndex; i++) {
+      this.currentState.steps[i].status = DeploymentStepStatus.WAITING_FOR_ROLLBACK;
+    }
 
     this.currentState.status = DeploymentStatus.ROLLING_BACK;
 

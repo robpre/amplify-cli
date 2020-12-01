@@ -284,7 +284,7 @@ export async function run(context, resourceDefinition) {
     spinner.fail('An error occurred when pushing the resources to the cloud');
 
     if (iterativeDeploymentWasInvoked) {
-      deploymentStateManager.finishDeployment(DeploymentStatus.FAILED);
+      deploymentStateManager.failDeployment();
     }
 
     throw error;

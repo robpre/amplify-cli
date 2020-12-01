@@ -32,8 +32,9 @@ export enum DeploymentStepStatus {
 
 export interface IDeploymentStateManager {
   startDeployment(steps: DeploymentStepState[]): Promise<boolean>;
-  finishDeployment(status: DeploymentStatus): Promise<boolean>;
+  failDeployment(): Promise<void>;
   updateCurrentStepStatus(status: DeploymentStepStatus): Promise<void>;
+  startCurrentStep(): Promise<void>;
   advanceStep(): Promise<void>;
   startRollback(): Promise<void>;
 

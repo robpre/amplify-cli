@@ -6,7 +6,6 @@ describe('deployment state manager', () => {
   let deploymentStateManager: IDeploymentStateManager;
 
   let s3Files: Record<string, string> = {};
-  let simulate404: boolean = false;
 
   const mockContext: any = {
     amplify: {
@@ -40,10 +39,6 @@ describe('deployment state manager', () => {
           },
           getStringObjectFromBucket: async (bucketName: string, objectKey: string): Promise<string> => {
             return new Promise((resolve, _) => {
-              if (simulate404) {
-                resolve(undefined);
-              }
-
               resolve(s3Files[objectKey]);
             });
           },
@@ -56,7 +51,6 @@ describe('deployment state manager', () => {
 
   afterEach(async () => {
     s3Files = {};
-    simulate404 = false;
   });
 
   it('deployment in progress reflected correctly', async () => {
@@ -74,11 +68,48 @@ describe('deployment state manager', () => {
     isInProgress = await deploymentStateManager.isDeploymentInProgress();
     expect(isInProgress).toBe(true);
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYED);
-    await deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED);
+    await deploymentStateManager.startCurrentStep();
+
+    let currentStatus = deploymentStateManager.getStatus();
+    expect(currentStatus.steps[0].status).toBe(DeploymentStepStatus.DEPLOYING);
+
+    await deploymentStateManager.advanceStep();
+
+    currentStatus = deploymentStateManager.getStatus();
+    expect(currentStatus.steps[0].status).toBe(DeploymentStepStatus.DEPLOYED);
 
     isInProgress = await deploymentStateManager.isDeploymentInProgress();
     expect(isInProgress).toBe(false);
+  });
+
+  it('should not advance forward without starting step', async () => {
+    let started = await deploymentStateManager.startDeployment([
+      {
+        status: DeploymentStepStatus.WAITING_FOR_DEPLOYMENT,
+      },
+    ]);
+
+    expect(started).toBe(true);
+
+    await expect(deploymentStateManager.advanceStep()).rejects.toThrow(
+      'Cannot advance step then the current step is in WAITING_FOR_DEPLOYMENT status.',
+    );
+  });
+
+  it('should not advance backward without starting step', async () => {
+    let started = await deploymentStateManager.startDeployment([
+      {
+        status: DeploymentStepStatus.WAITING_FOR_DEPLOYMENT,
+      },
+    ]);
+
+    expect(started).toBe(true);
+
+    await deploymentStateManager.startRollback();
+
+    await expect(deploymentStateManager.advanceStep()).rejects.toThrow(
+      'Cannot advance step then the current step is in WAITING_FOR_ROLLBACK status.',
+    );
   });
 
   it('second start fails if deployment is in progress', async () => {
@@ -106,7 +137,8 @@ describe('deployment state manager', () => {
       },
     ]);
 
-    await deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED);
+    await deploymentStateManager.startCurrentStep();
+    await deploymentStateManager.advanceStep();
 
     started = await deploymentStateManager.startDeployment([
       {
@@ -118,6 +150,18 @@ describe('deployment state manager', () => {
   });
 
   it('no deployment in progress when a deployment already finished previously present', async () => {
+    await deploymentStateManager.startDeployment([
+      {
+        status: DeploymentStepStatus.WAITING_FOR_DEPLOYMENT,
+      },
+    ]);
+
+    await deploymentStateManager.startCurrentStep();
+    await deploymentStateManager.advanceStep();
+
+    const currentStatus = deploymentStateManager.getStatus();
+    expect(currentStatus.status).toBe(DeploymentStatus.DEPLOYED);
+
     let isInProgress = await deploymentStateManager.isDeploymentInProgress();
 
     expect(isInProgress).toBe(false);
@@ -138,24 +182,21 @@ describe('deployment state manager', () => {
 
     expect(started).toBe(true);
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYED);
+    await deploymentStateManager.startCurrentStep();
     await deploymentStateManager.advanceStep();
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYED);
+    await deploymentStateManager.startCurrentStep();
     await deploymentStateManager.advanceStep();
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYED);
-
-    const finished = await deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED);
-
-    expect(finished).toBe(true);
+    await deploymentStateManager.startCurrentStep();
+    await deploymentStateManager.advanceStep();
 
     const currentCloudState = await DeploymentStateManager.getStatusFromCloud(mockContext);
 
     expect(currentCloudState.status).toBe(DeploymentStatus.DEPLOYED);
     expect(currentCloudState.steps.filter(s => s.status === DeploymentStepStatus.DEPLOYED).length).toBe(3);
 
-    const currentStatus = await deploymentStateManager.getStatus();
+    const currentStatus = deploymentStateManager.getStatus();
     const cloudStatus = await DeploymentStateManager.getStatusFromCloud(mockContext);
 
     expect(currentStatus).toMatchObject(cloudStatus);
@@ -176,19 +217,17 @@ describe('deployment state manager', () => {
 
     expect(started).toBe(true);
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYED);
+    await deploymentStateManager.startCurrentStep();
+
     await deploymentStateManager.advanceStep();
 
     await deploymentStateManager.startRollback();
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.ROLLED_BACK);
+    await deploymentStateManager.startCurrentStep();
     await deploymentStateManager.advanceStep();
 
-    await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.ROLLED_BACK);
-
-    const finished = await deploymentStateManager.finishDeployment(DeploymentStatus.ROLLED_BACK);
-
-    expect(finished).toBe(true);
+    await deploymentStateManager.startCurrentStep();
+    await deploymentStateManager.advanceStep();
 
     const currentCloudState = await DeploymentStateManager.getStatusFromCloud(mockContext);
 
@@ -202,30 +241,6 @@ describe('deployment state manager', () => {
     expect(currentStatus).toMatchObject(cloudStatus);
   });
 
-  it('advance to non-existent next step fails', async () => {
-    await deploymentStateManager.startDeployment([
-      {
-        status: DeploymentStepStatus.WAITING_FOR_DEPLOYMENT,
-      },
-    ]);
-
-    expect(deploymentStateManager.advanceStep()).rejects.toThrow('Error: No more deployment steps to advance to (index: 0, direction: 1');
-  });
-
-  it('advance to non-existent next step fails with rollback', async () => {
-    await deploymentStateManager.startDeployment([
-      {
-        status: DeploymentStepStatus.WAITING_FOR_DEPLOYMENT,
-      },
-    ]);
-
-    await deploymentStateManager.startRollback();
-
-    expect(deploymentStateManager.getStatus().status).toBe(DeploymentStatus.ROLLING_BACK);
-
-    expect(deploymentStateManager.advanceStep()).rejects.toThrow('Error: No more deployment steps to advance to (index: 0, direction: -1');
-  });
-
   it('cannot finish deployment twice', async () => {
     await deploymentStateManager.startDeployment([
       {
@@ -233,13 +248,10 @@ describe('deployment state manager', () => {
       },
     ]);
 
-    const finished = await deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED);
+    await deploymentStateManager.startCurrentStep();
+    await deploymentStateManager.advanceStep();
 
-    expect(finished).toBe(true);
-
-    expect(deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED)).rejects.toThrow(
-      'Cannot finish a deployment when it was not started.',
-    );
+    await expect(deploymentStateManager.advanceStep()).rejects.toThrow('Cannot advance a deployment when it was not started.');
   });
 
   it('cannot finish rolled back deployment twice', async () => {
@@ -251,13 +263,10 @@ describe('deployment state manager', () => {
 
     await deploymentStateManager.startRollback();
 
-    const finished = await deploymentStateManager.finishDeployment(DeploymentStatus.ROLLED_BACK);
+    await deploymentStateManager.startCurrentStep();
+    await deploymentStateManager.advanceStep();
 
-    expect(finished).toBe(true);
-
-    expect(deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED)).rejects.toThrow(
-      'Cannot finish a deployment when it was not started.',
-    );
+    await expect(deploymentStateManager.advanceStep()).rejects.toThrow('Cannot advance a deployment when it was not started.');
   });
 
   it('can set FAILED status on in-progress deployments', async () => {
@@ -267,11 +276,9 @@ describe('deployment state manager', () => {
       },
     ]);
 
-    const finished = await deploymentStateManager.finishDeployment(DeploymentStatus.FAILED);
+    await deploymentStateManager.failDeployment();
 
-    expect(finished).toBe(true);
-
-    const currentStatus = await deploymentStateManager.getStatus();
+    const currentStatus = deploymentStateManager.getStatus();
 
     expect(currentStatus.status).toBe(DeploymentStatus.FAILED);
   });
@@ -290,21 +297,5 @@ describe('deployment state manager', () => {
     await deploymentStateManager.startRollback();
 
     expect(deploymentStateManager.startRollback()).rejects.toThrow('Cannot rollback a non-deploying deployment');
-  });
-
-  it('cannot finish by passing in invalid status', async () => {
-    await deploymentStateManager.startDeployment([
-      {
-        status: DeploymentStepStatus.WAITING_FOR_DEPLOYMENT,
-      },
-    ]);
-
-    expect(deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYING)).rejects.toThrow(
-      'Invalid status DEPLOYING for finishDeployment.',
-    );
-    expect(deploymentStateManager.finishDeployment(DeploymentStatus.IDLE)).rejects.toThrow('Invalid status IDLE for finishDeployment.');
-    expect(deploymentStateManager.finishDeployment(DeploymentStatus.ROLLING_BACK)).rejects.toThrow(
-      'Invalid status ROLLING_BACK for finishDeployment.',
-    );
   });
 });
