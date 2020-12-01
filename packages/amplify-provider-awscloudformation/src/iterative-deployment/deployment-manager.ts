@@ -108,7 +108,6 @@ export class DeploymentManager {
     return new Promise(async (resolve, reject) => {
       const service = interpret(machine)
         .onTransition(async state => {
-          await this.updateDeploymentStatus(state, deploymentStateManager);
           if (state.changed) {
             maxDeployed = Math.max(maxDeployed, state.context.currentIndex + 1);
             if (state.matches('idle')) {
@@ -291,42 +290,5 @@ export class DeploymentManager {
 
   private rollBackStack = async (currentStack: Readonly<DeploymentMachineOp>): Promise<void> => {
     await this.doDeploy(currentStack);
-  };
-
-  private updateDeploymentStatus = async (
-    machineState: DeploymentMachineState,
-    deploymentStateManager: IDeploymentStateManager,
-  ): Promise<void> => {
-    if (machineState.changed) {
-      if (machineState.value === 'rollback' && machineState.history?.matches('deploy')) {
-        deploymentStateManager.startRollback();
-      } else if (machineState.matches('deploy.triggerDeploy')) {
-        if (!machineState.history?.matches('idle')) {
-          if (machineState.context.currentIndex < machineState.context.stacks.length - 1) {
-            await deploymentStateManager.advanceStep(DeploymentStepStatus.DEPLOYED);
-          } else {
-            await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYED);
-          }
-        }
-      } else if (machineState.matches('rollback.triggerRollback')) {
-        if (machineState.context.currentIndex > 0) {
-          await deploymentStateManager.advanceStep(DeploymentStepStatus.ROLLED_BACK);
-        } else {
-          await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.ROLLED_BACK);
-        }
-      } else if (machineState.matches('deploy.waitingForDeployment')) {
-        await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.DEPLOYING);
-      } else if (machineState.matches('deploy.waitForTablesToBeReady') || machineState.matches('rollback.waitForTablesToBeReady')) {
-        await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.WAITING_FOR_TABLE_TO_BE_READY);
-      } else if (machineState.matches('rollback.waitingForRollback')) {
-        await deploymentStateManager.updateCurrentStepStatus(DeploymentStepStatus.WAITING_FOR_ROLLBACK);
-      } else if (machineState.matches('deployed')) {
-        await deploymentStateManager.finishDeployment(DeploymentStatus.DEPLOYED);
-      } else if (machineState.matches('rolledBack')) {
-        await deploymentStateManager.finishDeployment(DeploymentStatus.ROLLED_BACK);
-      } else if (machineState.matches('failed')) {
-        await deploymentStateManager.finishDeployment(DeploymentStatus.FAILED);
-      }
-    }
   };
 }
