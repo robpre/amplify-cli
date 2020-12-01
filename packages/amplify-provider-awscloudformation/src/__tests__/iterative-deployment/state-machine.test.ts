@@ -12,6 +12,7 @@ describe('deployment state machine', () => {
     rollbackFn: jest.fn().mockResolvedValue(undefined),
     rollbackWaitFn: jest.fn().mockResolvedValue(undefined),
     tableReadyWaitFn: jest.fn().mockResolvedValue(undefined),
+    startRollbackFn: jest.fn().mockResolvedValue(undefined),
     stackEventPollFn: jest.fn().mockImplementation(() => {
       return () => {};
     }),
@@ -77,6 +78,7 @@ describe('deployment state machine', () => {
     (fns.deploymentWaitFn as jest.Mock).mockResolvedValue(undefined);
     (fns.rollbackFn as jest.Mock).mockResolvedValue(undefined);
     (fns.rollbackWaitFn as jest.Mock).mockResolvedValue(undefined);
+    (fns.startRollbackFn as jest.Mock).mockResolvedValue(undefined);
     (fns.tableReadyWaitFn as jest.Mock).mockResolvedValue(undefined);
   });
 
@@ -170,6 +172,9 @@ describe('deployment state machine', () => {
           // rollback of first stack after second one is complete
           expect(rollbackMock.mock.calls[1][0]).toEqual(firstStackRollbackArg);
           expect(tableReadWaitMock.mock.calls[4]).toContainEqual(firstStackRollbackArg);
+
+          // Notify rollback
+          expect(fns.startRollbackFn).toHaveBeenCalledTimes(1);
 
           done();
         }

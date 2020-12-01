@@ -18,7 +18,6 @@ export type DeploymentMachineStep = {
 };
 
 export type DeployMachineContext = {
-  // currentCloudFolder: string;
   deploymentBucket: string;
   region: string;
   stacks: DeploymentMachineStep[];
@@ -71,7 +70,9 @@ export type StateMachineHelperFunctions = {
   rollbackWaitFn: (stack: Readonly<DeploymentMachineOp>) => Promise<void>;
   tableReadyWaitFn: (stack: Readonly<DeploymentMachineOp>) => Promise<void>;
   stackEventPollFn: (stack: Readonly<DeploymentMachineOp>) => () => void;
+  startRollbackFn: (context: Readonly<DeployMachineContext>) => Promise<void>;
 };
+
 export function createDeploymentMachine(initialContext: DeployMachineContext, helperFns: StateMachineHelperFunctions) {
   const machine = Machine<DeployMachineContext, DeployMachineSchema, DeployMachineEvent>(
     {
@@ -142,6 +143,10 @@ export function createDeploymentMachine(initialContext: DeployMachineContext, he
         rollback: {
           id: 'rollback',
           initial: 'waitForTablesToBeReady',
+          invoke: {
+            id: 'enter-rollback',
+            src: helperFns.startRollbackFn,
+          },
           states: {
             triggerRollback: {
               entry: assign((context: DeployMachineContext) => {

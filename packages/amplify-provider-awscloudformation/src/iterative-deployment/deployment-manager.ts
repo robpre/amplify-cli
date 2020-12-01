@@ -1,26 +1,21 @@
 import * as aws from 'aws-sdk';
 import assert from 'assert';
-import * as path from 'path';
 import throttle from 'lodash.throttle';
 import {
   createDeploymentMachine,
   DeploymentMachineOp,
   DeploymentMachineStep,
   StateMachineHelperFunctions,
-  DeploymentMachineState,
+  DeployMachineContext,
 } from './state-machine';
-import { interpret, State } from 'xstate';
+import { interpret } from 'xstate';
 import { IStackProgressPrinter, StackEventMonitor } from './stack-event-monitor';
 import { StackProgressPrinter } from './stack-progress-printer';
 import ora from 'ora';
 import configurationManager from '../configuration-manager';
-import { $TSContext, DeploymentStatus, IDeploymentStateManager } from 'amplify-cli-core';
+import { $TSContext, IDeploymentStateManager } from 'amplify-cli-core';
 import { ConfigurationOptions } from 'aws-sdk/lib/config-base';
 import { getBucketKey, getHttpUrl } from './helpers';
-import { DeploymentStateManager } from './deployment-state-manager';
-import { DeploymentStepStatus } from 'amplify-cli-core';
-import { update } from 'lodash';
-
 interface DeploymentManagerOptions {
   throttleDelay?: number;
   eventPollingDelay?: number;
@@ -59,6 +54,7 @@ export class DeploymentManager {
   private options: Required<DeploymentManagerOptions>;
   private cfnClient: aws.CloudFormation;
   private s3Client: aws.S3;
+  private deploymentStateManager?: IDeploymentStateManager;
   private constructor(
     creds: ConfigurationOptions,
     private region: string,
@@ -78,6 +74,8 @@ export class DeploymentManager {
   }
 
   public deploy = async (deploymentStateManager: IDeploymentStateManager): Promise<void> => {
+    this.deploymentStateManager = deploymentStateManager;
+
     // sanity check before deployment
     const deploymentTemplates = this.deployment.reduce<Set<string>>((acc, step) => {
       acc.add(step.deployment.stackTemplatePath);
@@ -93,6 +91,7 @@ export class DeploymentManager {
       tableReadyWaitFn: this.waitForIndices,
       rollbackWaitFn: this.waitForDeployment,
       stackEventPollFn: this.stackPollFn,
+      startRollbackFn: this.startRollBackFn,
     };
     const machine = createDeploymentMachine(
       {
@@ -171,6 +170,18 @@ export class DeploymentManager {
   };
 
   /**
+   * Called when an deployment is failed and rolling back is started
+   * @param context deployment machie context
+   */
+  private startRollBackFn = async (_: Readonly<DeployMachineContext>): Promise<void> => {
+    try {
+      await this.deploymentStateManager?.startRollback();
+    } catch (e) {
+      // ignore, rollback should not fail because updating the deployment status fails
+    }
+  };
+
+  /**
    * Ensure that the stack is present and can be deployed
    * @param stackName name of the stack
    */
@@ -184,7 +195,6 @@ export class DeploymentManager {
    * @param templatePath path of the cloudformation file
    */
   private ensureTemplateExists = async (templatePath: string): Promise<boolean> => {
-    let key = templatePath;
     try {
       const bucketKey = getBucketKey(templatePath, this.deploymentBucket);
       await this.s3Client.headObject({ Bucket: this.deploymentBucket, Key: bucketKey }).promise();
@@ -227,6 +237,11 @@ export class DeploymentManager {
 
     try {
       await Promise.all(waiters);
+      try {
+        await this.deploymentStateManager?.advanceStep();
+      } catch (e) {
+        // deployment should not fail because saving status failed
+      }
       return Promise.resolve();
     } catch (e) {
       Promise.reject(e);
@@ -248,6 +263,11 @@ export class DeploymentManager {
   };
 
   private doDeploy = async (currentStack: DeploymentMachineOp): Promise<void> => {
+    try {
+      await this.deploymentStateManager?.startCurrentStep();
+    } catch (e) {
+      // deployment should not fail because status could not be saved
+    }
     const cfn = this.cfnClient;
     assert(currentStack.stackName, 'stack name should be passed to doDeploy');
     assert(currentStack.stackTemplateUrl, 'stackTemplateUrl must be passed to doDeploy');
