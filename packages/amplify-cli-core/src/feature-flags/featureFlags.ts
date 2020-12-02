@@ -508,7 +508,8 @@ export class FeatureFlags {
         name: 'enableIterativeGSIUpdates',
         type: 'boolean',
         defaultValueForExistingProjects: false,
-        defaultValueForNewProjects: false,
+        // Todo: change this to true once e2e tests are run
+        defaultValueForNewProjects: true,
       },
     ]);
   };
