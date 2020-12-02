@@ -842,7 +842,7 @@ function updateIdPRolesInNestedStack(context, nestedStack, authResourceName) {
 
 export async function generateAndUploadRootStack(context: $TSContext, destinationPath: string, destinationS3Key: string) {
   const projectDetails = context.amplify.getProjectDetails();
-  const nestedStack = formNestedStack(context, projectDetails);
+  const nestedStack = await formNestedStack(context, projectDetails);
 
   JSONUtilities.writeJson(destinationPath, nestedStack);
 
