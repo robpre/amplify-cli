@@ -12,7 +12,6 @@ import {
   $TSContext,
   $TSObject,
   $TSMeta,
-  DeploymentStatus,
   DeploymentStepState,
   DeploymentStepStatus,
 } from 'amplify-cli-core';
@@ -37,6 +36,7 @@ import { Template } from 'cloudform-types';
 import { getGqlUpdatedResource } from './graphql-transformer/utils';
 import { DeploymentStep, DeploymentOp } from './iterative-deployment/deployment-manager';
 import { DeploymentStateManager } from './iterative-deployment/deployment-state-manager';
+import { isAmplifyAdminApp } from './utils/admin-helpers';
 // keep in sync with ServiceName in amplify-category-function, but probably it will not change
 const FunctionServiceNameLambdaLayer = 'LambdaLayer';
 
@@ -341,11 +341,11 @@ export async function updateStackForAPIMigration(context, category, resourceName
       if (isReverting && isCLIMigration) {
         // When this is a CLI migration and we are rolling back, we do not want to inject
         // an [env] for any templates.
-        nestedStack = formNestedStack(context, projectDetails, category, resourceName, 'AppSync', true);
+        nestedStack = await formNestedStack(context, projectDetails, category, resourceName, 'AppSync', true);
       } else if (isCLIMigration) {
-        nestedStack = formNestedStack(context, projectDetails, category, resourceName, 'AppSync');
+        nestedStack = await formNestedStack(context, projectDetails, category, resourceName, 'AppSync');
       } else {
-        nestedStack = formNestedStack(context, projectDetails, category);
+        nestedStack = await formNestedStack(context, projectDetails, category);
       }
 
       await updateCloudFormationNestedStack(context, nestedStack, resourcesToBeCreated, resourcesToBeUpdated);
@@ -651,7 +651,7 @@ async function uploadTemplateToS3(
   context.amplify.updateamplifyMetaAfterResourceUpdate(category, resourceName, 'providerMetadata', providerMetadata);
 }
 
-function formNestedStack(
+async function formNestedStack(
   context: $TSContext,
   projectDetails: $TSObject,
   categoryName?: string,
@@ -663,8 +663,14 @@ function formNestedStack(
   const nestedStack = JSONUtilities.readJson<Template>(initTemplateFilePath);
 
   // Track Amplify Console generated stacks
-  if (!!process.env.CLI_DEV_INTERNAL_DISABLE_AMPLIFY_APP_DELETION) {
-    nestedStack.Description = 'Root Stack for AWS Amplify Console';
+  try {
+    const amplifyMeta = stateManager.getMeta();
+    const appId = amplifyMeta.providers[providerName].AmplifyAppId;
+    if (await isAmplifyAdminApp(appId)) {
+      nestedStack.Description = 'Root Stack for AWS Amplify Console';
+    }
+  } catch (err) {
+    console.info('App not deployed yet.');
   }
 
   const { amplifyMeta } = projectDetails;

@@ -15,6 +15,8 @@ import { PredictionsTransformer } from 'graphql-predictions-transformer';
 import { KeyTransformer } from 'graphql-key-transformer';
 import { ProviderName as providerName } from './constants';
 import { AmplifyCLIFeatureFlagAdapter } from './utils/amplify-cli-feature-flag-adapter';
+import { isAmplifyAdminApp } from './utils/admin-helpers';
+import { stateManager } from 'amplify-cli-core';
 
 import {
   collectDirectivesByTypeNames,
@@ -137,8 +139,19 @@ function getTransformerFactory(context, resourceDir, authConfig?) {
 
     // TODO: Build dependency mechanism into transformers. Auth runs last
     // so any resolvers that need to be protected will already be created.
-    transformerList.push(new ModelAuthTransformer({ authConfig }));
 
+    let amplifyAdminEnabled: boolean = false;
+
+    try {
+      const amplifyMeta = stateManager.getMeta();
+      const appId = amplifyMeta?.providers?.[providerName]?.AmplifyAppId;
+      const res = await isAmplifyAdminApp(appId);
+      amplifyAdminEnabled = res.isAdminApp;
+    } catch (err) {
+      console.info('App not deployed yet.');
+    }
+
+    transformerList.push(new ModelAuthTransformer({ authConfig, addAwsIamAuthInOutputSchema: amplifyAdminEnabled }));
     return transformerList;
   };
 }

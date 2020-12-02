@@ -104,6 +104,18 @@ export type $TSTeamProviderInfo = any;
 // Use it for all object initializer usages: {}
 export type $TSObject = Record<string, $TSAny>;
 
+export enum AmplifyFrontend {
+  android = 'android',
+  ios = 'ios',
+  javascript = 'javascript',
+}
+export interface AmplifyProjectConfig {
+  projectName: string;
+  version: string;
+  frontend: AmplifyFrontend;
+  providers: string[];
+}
+
 // Temporary interface until Context refactor
 interface AmplifyToolkit {
   buildResources: () => $TSAny;
@@ -121,7 +133,7 @@ interface AmplifyToolkit {
   getFrontendPlugins: () => $TSAny;
   getEnvDetails: () => $TSAny;
   getEnvInfo: () => $TSAny;
-  getProviderPlugins: () => $TSAny;
+  getProviderPlugins: (context: $TSContext) => $TSAny;
   getPluginInstance: () => $TSAny;
   getProjectConfig: () => $TSAny;
   getProjectDetails: () => $TSAny;
@@ -129,7 +141,7 @@ interface AmplifyToolkit {
   getResourceStatus: (category?: $TSAny, resourceName?: $TSAny, providerName?: $TSAny, filteredResources?: $TSAny) => $TSAny;
   getResourceOutputs: () => $TSAny;
   getWhen: () => $TSAny;
-  inputValidation: () => $TSAny;
+  inputValidation: (input: $TSAny) => $TSAny;
   listCategories: () => $TSAny;
   makeId: () => $TSAny;
   openEditor: () => $TSAny;
