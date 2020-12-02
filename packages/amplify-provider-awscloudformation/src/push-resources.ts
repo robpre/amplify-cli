@@ -164,7 +164,7 @@ export async function run(context, resourceDefinition) {
       } else {
         spinner.start();
 
-        const nestedStack = formNestedStack(context, context.amplify.getProjectDetails());
+        const nestedStack = await formNestedStack(context, context.amplify.getProjectDetails());
 
         await updateCloudFormationNestedStack(context, nestedStack, resourcesToBeCreated, resourcesToBeUpdated);
       }
